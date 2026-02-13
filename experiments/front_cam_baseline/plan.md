@@ -191,15 +191,14 @@ calib["camera_intrinsic"]
 ```bash
 uv run ns-train splatfacto \
   --data data/derived/scene-0061_front \
-  --pipeline.model.max-num-gaussians 50000 \
   --max-num-iterations 1000 \
   --viewer.quit-on-train-completion True \
   --output-dir outputs/stage1_quick_test
 ```
 
 **設定理由**:
-* `max-num-gaussians 50000` - デフォルトの1/4、メモリ安全
 * `max-num-iterations 1000` - 超短時間（5分程度）
+* デフォルト設定を使用（ガウシアン数は自動調整）
 * RTX 4090（24GB VRAM）なら問題なく完走
 
 **確認ポイント**:
@@ -216,15 +215,14 @@ uv run ns-train splatfacto \
 ```bash
 uv run ns-train splatfacto \
   --data data/derived/scene-0061_front \
-  --pipeline.model.max-num-gaussians 100000 \
   --max-num-iterations 5000 \
   --viewer.quit-on-train-completion True \
   --output-dir outputs/stage2_light
 ```
 
 **設定理由**:
-* `max-num-gaussians 100000` - 中程度
 * `5000 iterations` - 軽量設定
+* デフォルト設定を使用（ガウシアン数は自動調整）
 * 1600x900×39フレームなら十分
 
 **確認ポイント**:
@@ -241,15 +239,14 @@ uv run ns-train splatfacto \
 ```bash
 uv run ns-train splatfacto \
   --data data/derived/scene-0061_front \
-  --pipeline.model.max-num-gaussians 200000 \
   --max-num-iterations 30000 \
   --viewer.quit-on-train-completion True \
   --output-dir outputs/stage3_full
 ```
 
 **設定理由**:
-* `200000 gaussians` - RTX 4090で余裕
 * `30000 iterations` - splatfactoのデフォルト
+* デフォルト設定を使用（ガウシアン数は自動調整）
 * 1600x900なら2時間以内で完了
 
 **目標品質**:
@@ -299,7 +296,6 @@ ns-viewer --load-config outputs/.../config.yml
 | スケール爆発 | 行列順序ミス      | T_world_cam = T_ego_cam @ T_world_egoの順序確認 |
 | 画像真っ黒  | intrinsicミス | transforms.jsonのfl_x/fl_yを確認 |
 | 地面が斜め  | 座標系不一致      | nuScenes→OpenCV座標変換を確認 |
-| メモリエラー | max-num-gaussians過大 | 50000→25000に減らす |
 | Gaussianが爆発 | pose破綻 | rotation行列のdet=1.0を確認 |
 
 ---

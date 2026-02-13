@@ -55,9 +55,15 @@ else
   exit 1
 fi
 
-# 3. Render (manual step after training)
+# 3. Post-training
 echo ""
-echo "=== Next: Render ==="
-echo "Find your latest output directory in outputs/"
-echo "Then run:"
-echo "  uv run ns-viewer --load-config outputs/.../config.yml"
+echo "=== Training Complete ==="
+CONFIG_PATH=$(ls -t outputs/stage${STAGE}_*/scene-*/splatfacto/*/config.yml 2>/dev/null | head -1)
+if [ -n "$CONFIG_PATH" ]; then
+  echo "Latest config: $CONFIG_PATH"
+  echo ""
+  echo "To view results, run:"
+  echo "  uv run ns-viewer --load-config $CONFIG_PATH"
+else
+  echo "Config file not found. Check outputs/ directory."
+fi
