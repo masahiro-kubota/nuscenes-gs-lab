@@ -27,6 +27,13 @@ nuScenesデータを使って、3D Gaussian Splattingを段階的に実験・拡
 
 ## セットアップ
 
+### 前提条件
+
+- **Python**: 3.10
+- **CUDA**: 11.8（CUDA 12.3ランタイム使用可）
+- **GPU**: NVIDIA GPU（24GB VRAM推奨、RTX 4090など）
+- **OS**: Linux x86_64
+
 ### 1. nuScenes miniデータセットの取得
 
 ```bash
