@@ -1,0 +1,17 @@
+[project]
+name = "nuscenes-gs-lab"
+version = "0.1.0"
+description = "nuScenes x 3D Gaussian Splatting experiment framework"
+requires-python = ">=3.12"
+dependencies = [
+    "nuscenes-devkit",
+    "numpy",
+    "scipy",
+    "pyquaternion",
+]
+
+[tool.uv]
+override-dependencies = [
+    "shapely>=2.0",
+    "matplotlib>=3.8",
+]

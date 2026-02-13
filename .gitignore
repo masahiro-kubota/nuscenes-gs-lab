@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# uv
+uv.lock
+
+# Data
+data/raw/
+data/derived/**/images/
+
+# Outputs
+outputs/
+*.ckpt
+*.pth
+*.pt
+
+# IDE
+.vscode/
+.idea/
