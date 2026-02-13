@@ -46,17 +46,18 @@ nuscenes-gs-lab/
 │
 ├── experiments/               # 実験ごとに独立
 │   ├── front_cam_baseline/    # CAM_FRONT single-cam baseline
+│   │   ├── plan.md            # 実験計画
+│   │   ├── notes.md           # 経緯・結果・所見
 │   │   ├── run.sh             # 再現コマンド一式
-│   │   ├── config.yaml        # 実験パラメータ
-│   │   └── notes.md           # 経緯・結果・所見
+│   │   └── results/           # レンダ画像・メトリクス等
 │   ├── vehicle_removal/
+│   │   ├── plan.md
+│   │   ├── notes.md
 │   │   ├── run.sh
 │   │   ├── inpaint.py         # この実験固有のスクリプト
-│   │   └── notes.md
+│   │   └── results/
 │   ├── relightable_gs/
 │   └── su_rgs/
-│
-├── doc/                       # 設計ドキュメント
 │
 ├── data/
 │   ├── raw/                   # nuScenes本体（gitignore）
@@ -92,13 +93,16 @@ nuscenes-gs-lab/
 
 各実験が自己完結する単位。
 
-* `config.yaml` — パラメータ（scene, 枚数, 手法, 学習回数）
+* `plan.md` — 実験計画（何をやるか、なぜやるか）
+* `notes.md` — 実験ログ（何を試した、何が壊れた、次何をやるか）
 * `run.sh` — 再現コマンド（export → train → render の全手順）
-* `notes.md` — 何を試した、何が壊れた、次何をやるか
+* `results/` — 結果物（レンダ画像、メトリクス等。軽いものだけgit管理）
 * 実験固有のスクリプト — その実験でしか使わない前処理・後処理
 
 共通処理は `src/` から import し、固有処理だけここに書く。
 コードが2つ以上の実験で必要になったら `src/` に昇格させる。
+
+重い学習出力（チェックポイント等）は `outputs/` に置く（gitignore済み）。
 
 ---
 
@@ -106,7 +110,7 @@ nuscenes-gs-lab/
 
 ```
 1. experiments/<name>/ を作成
-2. config.yaml でパラメータ定義
+2. plan.md で計画を書く
 3. データ変換（scripts/ or 実験固有スクリプト）
 4. 学習・レンダリング
 5. notes.md に結果を記録
