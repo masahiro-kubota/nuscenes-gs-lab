@@ -45,7 +45,7 @@ nuscenes-gs-lab/
 │   └── visualize_poses.py
 │
 ├── experiments/               # 実験ごとに独立
-│   ├── a_prime/               # A': front-only baseline
+│   ├── front_cam_baseline/    # CAM_FRONT single-cam baseline
 │   │   ├── run.sh             # 再現コマンド一式
 │   │   ├── config.yaml        # 実験パラメータ
 │   │   └── notes.md           # 経緯・結果・所見
@@ -132,7 +132,7 @@ outputs/
 
 | フェーズ           | 内容                            |
 | ---------------- | ------------------------------- |
-| A'               | front-only baseline             |
+| front_cam_baseline | front-only baseline           |
 | A-mask           | bbox マスク                      |
 | B                | LiDAR 拘束                      |
 | C                | multi-cam                       |
