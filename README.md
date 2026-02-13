@@ -72,7 +72,8 @@ nuscenes-gs-lab/
 │
 ├── scripts/                   # 汎用ツール（実験横断）
 │   ├── export_front_only.py
-│   └── visualize_poses.py     # ポーズ3D可視化
+│   ├── visualize_poses.py     # ポーズ3D可視化（静的PNG）
+│   └── pose_viewer.py         # ポーズ+画像ビューア（Streamlit）
 │
 ├── experiments/               # 実験ごとに独立
 │   ├── front_cam_baseline/    # CAM_FRONT single-cam baseline
