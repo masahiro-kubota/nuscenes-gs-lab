@@ -1,5 +1,56 @@
 # Experiment 01: Scene Analysis - Notes
 
-## 実験ログ
+## 2026-02-14: Scene Speed Analysis Implementation
 
-このファイルには、Experiment 01 の実行過程で得られた知見や結果を記録します。
+### スクリプト作成
+
+- `scripts/analyze_scene_speed.py` - シーン速度分析スクリプト作成完了
+- `scripts/lidarseg_viewer.py` - Streamlit可視化アプリ初期版作成完了
+
+### シーン速度分析結果
+
+nuScenes mini 10シーンの速度分析を実施：
+
+```
+=== Scene Speed Analysis ===
+Scene           Frames   Avg Speed (km/h)   Stop Ratio
+------------------------------------------------------------
+scene-0553      41              0.0         100.0%
+scene-1100      40              0.2         100.0%
+scene-0757      41              5.0          60.0%
+scene-0916      41             16.8           0.0%
+scene-0061      39             17.3           0.0%
+scene-0103      40             21.8           0.0%
+scene-1094      40             23.2          10.3%
+scene-0655      41             29.3           0.0%
+scene-0796      40             43.7           0.0%
+scene-1077      41             45.3           0.0%
+```
+
+### 重要な発見
+
+**最も低速なシーン**:
+- **scene-0553**: 0.0 km/h, 停止率100% - 完全停止シーン
+- **scene-1100**: 0.2 km/h, 停止率100% - ほぼ停止シーン
+- **scene-0757**: 5.0 km/h, 停止率60% - 低速で停止が多い
+
+**baseline実験で使用済み**:
+- **scene-0061**: 17.3 km/h - Phase 0（front_cam_baseline）で使用
+
+### 推奨シーン選択
+
+LiDAR segmentation masking実験（Phase 2）では、以下のシーンが推奨される：
+
+1. **scene-0553** - 完全停止、最も安定
+2. **scene-0757** - 低速・停止混在、実用的
+3. **scene-0061** - baseline との比較に最適（既存データ利用可能）
+
+**理由**:
+- 2Hz サンプリングレートでは、動体のモーションブラーが大きい
+- 低速・停止が多いシーンでは、マスクの効果が高い
+- scene-0061はbaseline比較に便利（既に学習済みモデルあり）
+
+### 次のステップ
+
+- Streamlit アプリの動作確認（`uv run streamlit run scripts/lidarseg_viewer.py`）
+- Experiment 02 でlidarsegデータパック取得とLiDAR投影実装
