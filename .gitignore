@@ -9,6 +9,7 @@ uv.lock
 # Data
 data/raw/
 data/derived/**/images/
+data/derived/**/*.png
 
 # Outputs
 outputs/

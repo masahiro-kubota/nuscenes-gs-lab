@@ -67,27 +67,21 @@ nuscenes-gs-lab/
 │   ├── __init__.py
 │   ├── poses.py               # pose合成・座標変換
 │   ├── nerfstudio_export.py   # Nerfstudio形式エクスポート
-│   ├── masks.py               # bbox除去、セグメンテーション
-│   └── geometry.py            # LiDAR投影など
+│   ├── masks.py               # bbox除去、セグメンテーション（予定）
+│   └── geometry.py            # LiDAR投影など（予定）
 │
 ├── scripts/                   # 汎用ツール（実験横断）
 │   ├── export_front_only.py
-│   └── visualize_poses.py
+│   └── visualize_poses.py     # ポーズ3D可視化
 │
 ├── experiments/               # 実験ごとに独立
 │   ├── front_cam_baseline/    # CAM_FRONT single-cam baseline
 │   │   ├── plan.md            # 実験計画
 │   │   ├── notes.md           # 経緯・結果・所見
-│   │   ├── run.sh             # 再現コマンド一式
-│   │   └── results/           # レンダ画像・メトリクス等
-│   ├── vehicle_removal/
-│   │   ├── plan.md
-│   │   ├── notes.md
-│   │   ├── run.sh
-│   │   ├── inpaint.py         # この実験固有のスクリプト
-│   │   └── results/
-│   ├── relightable_gs/
-│   └── su_rgs/
+│   │   └── run.sh             # 再現コマンド一式
+│   ├── vehicle_removal/       # （予定）
+│   ├── relightable_gs/        # （予定）
+│   └── su_rgs/                # （予定）
 │
 ├── data/
 │   ├── raw/                   # nuScenes本体（gitignore）
