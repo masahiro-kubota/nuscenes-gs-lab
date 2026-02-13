@@ -49,4 +49,21 @@ nuScenes mini の 1シーンから CAM_FRONT のみ抽出し、splatfacto で学
 - 試行3: `export MAX_JOBS=1 && uv pip install gsplat==1.4.0` → インストール成功
 - 試行4: Stage 1学習開始（1000 iterations、MAX_JOBS=1設定）
   - 出力先: outputs/stage1_quick_test/scene-0061_front/splatfacto/2026-02-13_222128/
-  - 状態: 画像キャッシュ処理中...
+  - 状態: 画像キャッシュ処理中... → 失敗（MAX_JOBS=1が効かなかった）
+
+**最終解決策**: 事前ビルド済みwheelを使用（Python 3.10必須）
+- 試行5: PyTorch 2.1.2+cu121 + gsplat 1.5.3事前ビルド済みwheel
+  - **重要**: gsplat 1.5.3の事前ビルド済みwheelはPython 3.10専用（cp310）
+  - Python 3.11用の事前ビルド済みwheelは存在しない
+  - Python 3.10にダウングレード
+  - PyTorch 2.1.2+cu121をPyTorch公式リポジトリからインストール
+  - gsplat 1.5.3+pt24cu124をgsplat公式リポジトリからインストール（JITコンパイル不要）
+  - numpy 1.26.4（PyTorch 2.1.2との互換性のためnumpy<2制約）
+  - 結果: 環境構築成功
+- 試行6: `uv add`を使った正しい依存関係管理
+  - **重要**: pyproject.tomlを直接編集せず、`uv add`コマンドを使用
+  - **重要**: バージョンを指定せず、uvの依存関係解決に任せる
+  - `uv add torch torchvision gsplat` (バージョン指定なし)
+  - 結果: PyTorch 2.5.1+cu121、gsplat 1.5.3+pt24cu124がインストール
+  - インポート確認成功、CUDA利用可能
+  - 次: Stage 1学習テスト
