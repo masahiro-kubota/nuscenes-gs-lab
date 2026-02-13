@@ -25,6 +25,36 @@ nuScenesデータを使って、3D Gaussian Splattingを段階的に実験・拡
 
 ---
 
+## セットアップ
+
+### 1. nuScenes miniデータセットの取得
+
+```bash
+# nuScenes miniをダウンロード (3.9GB)
+# https://www.nuscenes.org/nuscenes#download から v1.0-mini.tgz をダウンロード
+```
+
+### 2. データの展開
+
+```bash
+# data/raw/ ディレクトリを作成
+mkdir -p data/raw
+
+# ダウンロードしたファイルを展開
+tar -xzf ~/Downloads/v1.0-mini.tgz -C data/raw/
+```
+
+### 3. 動作確認
+
+```bash
+# nuScenesが正しく読み込めるか確認
+python3 -c "from nuscenes.nuscenes import NuScenes; nusc = NuScenes(version='v1.0-mini', dataroot='data/raw', verbose=True); print(f'シーン数: {len(nusc.scene)}')"
+```
+
+正常に読み込めれば「シーン数: 10」と表示されます。
+
+---
+
 ## ディレクトリ構成
 
 ```
