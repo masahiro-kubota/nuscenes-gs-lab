@@ -182,16 +182,99 @@ calib["camera_intrinsic"]
 
 ---
 
-# STEP 5：Splatfactoで学習
+# STEP 5：Splatfactoで学習（3段階アプローチ）
+
+## Stage 1: 超軽量テスト（5-10分）
+
+**目的**: 環境動作確認、パイプライン破綻チェック
 
 ```bash
-ns-train splatfacto --data path/to/converted_dataset
+uv run ns-train splatfacto \
+  --data data/derived/scene-0061_front \
+  --pipeline.model.max-num-gaussians 50000 \
+  --max-num-iterations 1000 \
+  --viewer.quit-on-train-completion True \
+  --output-dir outputs/stage1_quick_test
 ```
 
-まずは：
+**設定理由**:
+* `max-num-gaussians 50000` - デフォルトの1/4、メモリ安全
+* `max-num-iterations 1000` - 超短時間（5分程度）
+* RTX 4090（24GB VRAM）なら問題なく完走
 
-* iteration 少なめ（5kくらい）
-* resolution 下げる（最初は）
+**確認ポイント**:
+* CUDAメモリエラーが出ないか
+* transforms.jsonが正しく読み込まれるか
+* PSNRが上昇傾向か（15→20程度でもOK）
+
+---
+
+## Stage 2: 軽量テスト（20-30分）
+
+**目的**: 品質・収束性確認
+
+```bash
+uv run ns-train splatfacto \
+  --data data/derived/scene-0061_front \
+  --pipeline.model.max-num-gaussians 100000 \
+  --max-num-iterations 5000 \
+  --viewer.quit-on-train-completion True \
+  --output-dir outputs/stage2_light
+```
+
+**設定理由**:
+* `max-num-gaussians 100000` - 中程度
+* `5000 iterations` - 軽量設定
+* 1600x900×39フレームなら十分
+
+**確認ポイント**:
+* PSNR > 25
+* ns-viewerでレンダリング確認
+* 座標系の破綻がないか（地面が斜めになっていないか）
+
+---
+
+## Stage 3: フル品質（1-2時間）
+
+**目的**: 最終品質
+
+```bash
+uv run ns-train splatfacto \
+  --data data/derived/scene-0061_front \
+  --pipeline.model.max-num-gaussians 200000 \
+  --max-num-iterations 30000 \
+  --viewer.quit-on-train-completion True \
+  --output-dir outputs/stage3_full
+```
+
+**設定理由**:
+* `200000 gaussians` - RTX 4090で余裕
+* `30000 iterations` - splatfactoのデフォルト
+* 1600x900なら2時間以内で完了
+
+**目標品質**:
+* PSNR > 28-30
+* publication-quality rendering
+
+---
+
+## 時間見積もり（RTX 4090基準）
+
+| Stage | Iterations | 予想時間 | VRAM使用量 |
+|-------|-----------|---------|-----------|
+| 1     | 1,000     | 5-10分  | ~4GB      |
+| 2     | 5,000     | 20-30分 | ~6GB      |
+| 3     | 30,000    | 1-2時間 | ~8GB      |
+
+---
+
+## 推奨進行順序
+
+1. まずStage 1を実行 - 環境が正しく動くか確認
+2. Stage 1の出力を`ns-viewer`で確認
+3. 問題なければStage 2へ
+4. Stage 2で座標系・品質を確認
+5. 満足できればStage 3で最終品質
 
 ---
 
@@ -208,14 +291,16 @@ ns-viewer --load-config outputs/.../config.yml
 
 ---
 
-# ここで起きる典型トラブル
+# ここで起きる典型トラブル（Stage 1で検出）
 
-| 症状     | 原因          |
-| ------ | ----------- |
-| 全部バラバラ | 座標変換ミス      |
-| スケール爆発 | 行列順序ミス      |
-| 画像真っ黒  | intrinsicミス |
-| 地面が斜め  | 座標系不一致      |
+| 症状     | 原因          | 対処 |
+| ------ | ----------- | ---- |
+| 全部バラバラ | 座標変換ミス      | src/nuscenes_gs/poses.pyを確認 |
+| スケール爆発 | 行列順序ミス      | T_world_cam = T_ego_cam @ T_world_egoの順序確認 |
+| 画像真っ黒  | intrinsicミス | transforms.jsonのfl_x/fl_yを確認 |
+| 地面が斜め  | 座標系不一致      | nuScenes→OpenCV座標変換を確認 |
+| メモリエラー | max-num-gaussians過大 | 50000→25000に減らす |
+| Gaussianが爆発 | pose破綻 | rotation行列のdet=1.0を確認 |
 
 ---
 
