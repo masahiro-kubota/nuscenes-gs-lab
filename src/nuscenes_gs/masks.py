@@ -100,7 +100,7 @@ def project_points_to_image(
     w2c: np.ndarray,
     K: np.ndarray,
     image_shape: tuple[int, int],
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """World座標系の点群を2D画像に投影.
 
     Args:
@@ -112,6 +112,7 @@ def project_points_to_image(
     Returns:
         uv: (M, 2) pixel coordinates [u, v] for visible points
         valid_mask: (N,) boolean mask indicating which points are visible
+        distances: (M,) distances from camera for visible points
     """
     h, w = image_shape
 
@@ -127,6 +128,9 @@ def project_points_to_image(
     points_2d = (K @ points_cam[valid_mask].T).T  # (M, 3)
     uv = points_2d[:, :2] / points_2d[:, 2:3]  # (M, 2)
 
+    # 距離を取得（カメラ座標系のz値）
+    distances = points_cam[valid_mask, 2]
+
     # 画像境界内の点のみ
     in_bounds = (
         (uv[:, 0] >= 0) & (uv[:, 0] < w) &
@@ -137,7 +141,7 @@ def project_points_to_image(
     valid_indices = np.where(valid_mask)[0]
     valid_mask[valid_indices[~in_bounds]] = False
 
-    return uv[in_bounds], valid_mask
+    return uv[in_bounds], valid_mask, distances[in_bounds]
 
 
 def create_label_overlay(
@@ -145,14 +149,18 @@ def create_label_overlay(
     uv: np.ndarray,
     labels: np.ndarray,
     colormap: dict[int, tuple[int, int, int]] | None = None,
+    distances: np.ndarray | None = None,
+    point_radius: int = 5,
 ) -> np.ndarray:
-    """Semantic labelに基づいてカラーマップオーバーレイを作成.
+    """Semantic labelまたは距離に基づいてカラーマップオーバーレイを作成.
 
     Args:
         image_shape: (height, width)
         uv: (N, 2) pixel coordinates [u, v]
         labels: (N,) semantic class IDs
         colormap: dict mapping class ID to RGB color. If None, use default.
+        distances: (N,) distances from camera. If provided, use distance-based coloring.
+        point_radius: radius of each point in pixels
 
     Returns:
         overlay: (H, W, 3) RGB image with colored points
@@ -160,48 +168,93 @@ def create_label_overlay(
     h, w = image_shape
     overlay = np.zeros((h, w, 3), dtype=np.uint8)
 
-    # デフォルトカラーマップ（nuScenes semantic classes）
-    if colormap is None:
-        # 動的オブジェクトを赤系、静的背景を青/緑系で表現
-        colormap = {
-            # Vehicle (red-orange)
-            17: (255, 50, 50), 18: (255, 100, 50), 19: (255, 150, 50),
-            20: (200, 50, 50), 21: (200, 100, 50), 22: (200, 150, 50),
-            23: (150, 50, 50),
-            # Human (yellow)
-            2: (255, 255, 0), 3: (200, 200, 0), 4: (150, 150, 0),
-            5: (255, 200, 0), 6: (200, 150, 0), 7: (150, 100, 0),
-            # Cycle (purple)
-            14: (255, 0, 255), 15: (200, 0, 200), 16: (150, 0, 150),
-            # Static background (blue-green)
-            1: (0, 100, 200), 8: (0, 150, 150), 9: (0, 200, 100),
-            10: (100, 200, 100), 11: (150, 200, 50), 12: (200, 200, 50),
-            13: (100, 150, 100),
-            # Movable objects (orange)
-            24: (255, 150, 0), 25: (200, 120, 0), 26: (150, 100, 0),
-            27: (100, 80, 0), 28: (255, 180, 50), 29: (200, 150, 50),
-            30: (150, 120, 50), 31: (100, 90, 50),
-        }
+    # 距離ベースの色分けを使用する場合
+    if distances is not None:
+        # 距離を正規化（近い=0.0、遠い=1.0）
+        min_dist = distances.min()
+        max_dist = distances.max()
+        normalized_dist = (distances - min_dist) / (max_dist - min_dist + 1e-6)
 
-    # 各点を描画
-    for (u, v), label in zip(uv, labels):
-        u_int, v_int = int(round(u)), int(round(v))
-        if 0 <= u_int < w and 0 <= v_int < h:
-            color = colormap.get(label, (128, 128, 128))  # Gray for unknown
-            overlay[v_int, u_int] = color
+        # 各点を円として描画（距離で色分け）
+        for (u, v), dist_norm in zip(uv, normalized_dist):
+            u_int, v_int = int(round(u)), int(round(v))
+            if 0 <= u_int < w and 0 <= v_int < h:
+                # 青（近い） → 緑 → 黄 → 赤（遠い）のカラーマップ
+                if dist_norm < 0.33:
+                    # 青 → 緑
+                    r = 0
+                    g = int(255 * (dist_norm / 0.33))
+                    b = int(255 * (1 - dist_norm / 0.33))
+                elif dist_norm < 0.67:
+                    # 緑 → 黄
+                    r = int(255 * ((dist_norm - 0.33) / 0.34))
+                    g = 255
+                    b = 0
+                else:
+                    # 黄 → 赤
+                    r = 255
+                    g = int(255 * (1 - (dist_norm - 0.67) / 0.33))
+                    b = 0
+
+                color = (int(r), int(g), int(b))
+                cv2.circle(overlay, (u_int, v_int), radius=point_radius, color=color, thickness=-1)
+    else:
+        # Semantic labelベースの色分けを使用
+        if colormap is None:
+            # 動的オブジェクトを赤系、静的背景を青/緑系で表現
+            colormap = {
+                # Vehicle (red-orange)
+                17: (255, 50, 50), 18: (255, 100, 50), 19: (255, 150, 50),
+                20: (200, 50, 50), 21: (200, 100, 50), 22: (200, 150, 50),
+                23: (150, 50, 50),
+                # Human (yellow)
+                2: (255, 255, 0), 3: (200, 200, 0), 4: (150, 150, 0),
+                5: (255, 200, 0), 6: (200, 150, 0), 7: (150, 100, 0),
+                # Cycle (purple)
+                14: (255, 0, 255), 15: (200, 0, 200), 16: (150, 0, 150),
+                # Static background (blue-green)
+                1: (0, 100, 200), 8: (0, 150, 150), 9: (0, 200, 100),
+                10: (100, 200, 100), 11: (150, 200, 50), 12: (200, 200, 50),
+                13: (100, 150, 100),
+                # Movable objects (orange)
+                24: (255, 150, 0), 25: (200, 120, 0), 26: (150, 100, 0),
+                27: (100, 80, 0), 28: (255, 180, 50), 29: (200, 150, 50),
+                30: (150, 120, 50), 31: (100, 90, 50),
+            }
+
+        # 各点を円として描画
+        for (u, v), label in zip(uv, labels):
+            u_int, v_int = int(round(u)), int(round(v))
+            if 0 <= u_int < w and 0 <= v_int < h:
+                color = colormap.get(label, (128, 128, 128))  # Gray for unknown
+                cv2.circle(overlay, (u_int, v_int), radius=point_radius, color=color, thickness=-1)
 
     return overlay
 
 
 def compute_w2c(ego_pose: dict, calibrated_sensor: dict) -> np.ndarray:
-    """world-to-camera行列を計算（c2wの逆行列）.
+    """world-to-camera行列を計算（OpenCV座標系）.
 
     Args:
         ego_pose: ego_pose data
         calibrated_sensor: calibrated_sensor data
 
     Returns:
-        w2c: 4x4 world-to-camera transform matrix
+        w2c: 4x4 world-to-camera transform matrix (OpenCV convention)
     """
-    c2w = compute_c2w(ego_pose, calibrated_sensor)
-    return np.linalg.inv(c2w)
+    # ego → world
+    T_world_ego = make_transform(ego_pose['translation'], ego_pose['rotation'])
+
+    # camera → ego
+    T_ego_cam = make_transform(
+        calibrated_sensor['translation'],
+        calibrated_sensor['rotation']
+    )
+
+    # camera → world (OpenCV convention: x=右, y=下, z=前)
+    c2w_opencv = T_world_ego @ T_ego_cam
+
+    # world → camera (OpenCV convention)
+    w2c = np.linalg.inv(c2w_opencv)
+
+    return w2c
