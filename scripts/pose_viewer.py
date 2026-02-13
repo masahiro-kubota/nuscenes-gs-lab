@@ -33,12 +33,25 @@ scene_options = {p.parent.name: p for p in available}
 selected_scene = st.sidebar.selectbox("Scene", list(scene_options.keys()))
 transforms_path = scene_options[selected_scene]
 
+# --- マスクファイルの確認 ---
+# transforms.jsonを先に読み込んでマスクの有無を確認
+with open(transforms_path) as f:
+    transforms_data = json.load(f)
+has_masks = "mask_path" in transforms_data["frames"][0] if transforms_data["frames"] else False
+
 # --- 表示モード設定 ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("Display Mode")
+
+# マスクの有無に応じてモードを動的に変更
+if has_masks:
+    mode_options = ["Image Only", "Image + LiDAR", "Image + Mask", "LiDAR Only"]
+else:
+    mode_options = ["Image Only", "Image + LiDAR", "LiDAR Only"]
+
 display_mode = st.sidebar.radio(
     "Select Mode",
-    ["Image Only", "Image + LiDAR", "LiDAR Only"],
+    mode_options,
     index=0
 )
 
@@ -186,12 +199,17 @@ with col_image:
         if show_lidar and nusc and has_lidarseg:
             try:
                 # シーン名をディレクトリ名から抽出
+                # "scene-0757_front" -> "scene-0757"
+                # "scene-0757_front_lidar_masked" -> "scene-0757"
                 dir_name = transforms_path.parent.name
-                # "scene-0757_front" -> "scene-0757" または "scene-0061_front" -> "scene-0061"
-                if "_front" in dir_name:
-                    scene_name = dir_name.replace("_front", "")
+                # "scene-XXXX" の形式を抽出
+                import re
+                match = re.match(r"(scene-\d+)", dir_name)
+                if match:
+                    scene_name = match.group(1)
                 else:
-                    scene_name = dir_name.split("_")[0]
+                    # フォールバック: 最初の2つの部分を結合
+                    scene_name = "_".join(dir_name.split("_")[:2])
 
                 st.sidebar.info(f"Debug: シーン名={scene_name}, フレーム={frame_idx}")
 
@@ -346,6 +364,48 @@ with col_image:
             except Exception as e:
                 st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
                 st.error(f"LiDAR overlay エラー: {e}")
+        elif display_mode == "Image + Mask" and has_masks:
+            # マスク表示
+            try:
+                import cv2
+                mask_path = transforms_path.parent / frames[frame_idx]["mask_path"]
+                if mask_path.exists():
+                    # マスクを読み込み
+                    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+
+                    # マスクカバレッジ率を計算
+                    total_pixels = mask.shape[0] * mask.shape[1]
+                    masked_pixels = np.sum(mask > 0)
+                    coverage = masked_pixels / total_pixels * 100
+
+                    # 画像とマスクをオーバーレイ
+                    img_array = np.array(img)
+                    img_with_mask = img_array.copy()
+
+                    # マスク領域を塗りつぶし（不透明度70%）
+                    mask_rgb = np.zeros_like(img_array)
+                    mask_rgb[mask > 0] = [255, 0, 0]  # 赤色
+                    overlay_alpha = 0.7  # より不透明に
+                    img_with_mask[mask > 0] = (
+                        img_array[mask > 0] * (1 - overlay_alpha) +
+                        mask_rgb[mask > 0] * overlay_alpha
+                    ).astype(np.uint8)
+
+                    # 輪郭線を追加（より明確に）
+                    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    cv2.drawContours(img_with_mask, contours, -1, (255, 255, 0), 3)  # 黄色の太線
+
+                    img_with_mask_pil = Image.fromarray(img_with_mask)
+                    st.image(img_with_mask_pil, caption=f"Frame {frame_idx} (with Mask, Coverage: {coverage:.1f}%)", use_container_width=True)
+
+                    st.sidebar.info(f"Mask Coverage: {coverage:.1f}%")
+                    st.sidebar.info(f"Masked pixels: {masked_pixels:,} / {total_pixels:,}")
+                else:
+                    st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
+                    st.warning(f"マスクファイルが見つかりません: {mask_path}")
+            except Exception as e:
+                st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
+                st.error(f"マスク読み込みエラー: {e}")
         else:
             st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
     else:

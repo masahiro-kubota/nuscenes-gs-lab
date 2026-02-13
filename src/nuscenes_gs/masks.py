@@ -258,3 +258,153 @@ def compute_w2c(ego_pose: dict, calibrated_sensor: dict) -> np.ndarray:
     w2c = np.linalg.inv(c2w_opencv)
 
     return w2c
+
+
+def project_lidar_to_mask(
+    points_world: np.ndarray,
+    labels: np.ndarray,
+    w2c: np.ndarray,
+    K: np.ndarray,
+    image_shape: tuple[int, int],
+    dynamic_classes: list[int] | None = None,
+    dilation_size: int = 8,
+) -> np.ndarray:
+    """LiDAR点群から2Dバイナリマスクを生成.
+
+    Args:
+        points_world: (N, 3) LiDAR points in world frame
+        labels: (N,) semantic class IDs
+        w2c: 4x4 world-to-camera transform matrix
+        K: 3x3 camera intrinsic matrix
+        image_shape: (height, width)
+        dynamic_classes: List of semantic class IDs to mask. If None, use default.
+        dilation_size: Morphological dilation kernel size
+
+    Returns:
+        Binary mask (H, W) uint8 (Nerfstudio convention: 0=exclude from training, 255=include)
+    """
+    h, w = image_shape
+
+    # デフォルトの動的クラス
+    if dynamic_classes is None:
+        dynamic_classes = (
+            [17, 18, 19, 20, 21, 22, 23] +  # vehicle.*
+            [2, 3, 4, 5, 6, 7] +             # human.*
+            [14, 15, 16]                     # cycle.*
+        )
+
+    # 動的オブジェクトの点をフィルタ
+    dynamic_mask = np.isin(labels, dynamic_classes)
+    dynamic_points = points_world[dynamic_mask]
+
+    if len(dynamic_points) == 0:
+        # 動的点がない場合は全体を学習対象とする（Nerfstudio規約: 255=include）
+        return np.full((h, w), 255, dtype=np.uint8)
+
+    # 2D投影（既存の関数を利用）
+    uv, _, _ = project_points_to_image(dynamic_points, w2c, K, image_shape)
+
+    # バイナリマスクを初期化
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    # 投影された点の位置に円を描画（半径3ピクセル）
+    # LiDAR点は疎なので、各点を小さい円として描画することで連続した領域を作る
+    for u, v in uv:
+        u_int, v_int = int(round(u)), int(round(v))
+        if 0 <= u_int < w and 0 <= v_int < h:
+            # 1ピクセルではなく、半径3の円として描画
+            cv2.circle(mask, (u_int, v_int), radius=3, color=255, thickness=-1)
+
+    # モルフォロジー膨張を適用
+    if dilation_size > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_size, dilation_size))
+        mask = cv2.dilate(mask, kernel, iterations=1)
+
+    # Nerfstudio規約に合わせてマスクを反転
+    # Nerfstudio: 0=exclude from training (dynamic), 255=include (static)
+    # 現在のmask: 動的領域=255, 静的領域=0 → 反転が必要
+    mask = cv2.bitwise_not(mask)
+
+    return mask
+
+
+def generate_lidar_masks_for_scene(
+    nusc,
+    scene_token: str,
+    output_dir: Path,
+    dynamic_classes: list[int] | None = None,
+    dilation_size: int = 8,
+) -> dict[int, Path]:
+    """シーン全体の全フレームについてLiDARマスクを生成.
+
+    Args:
+        nusc: NuScenes instance
+        scene_token: Scene token
+        output_dir: Output directory for masks
+        dynamic_classes: List of semantic class IDs to mask. If None, use default.
+        dilation_size: Morphological dilation kernel size
+
+    Returns:
+        Dictionary mapping frame_idx to mask_path
+    """
+    from pathlib import Path
+
+    scene = nusc.get("scene", scene_token)
+    masks_dir = Path(output_dir) / "masks"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+
+    mask_paths = {}
+    sample_token = scene["first_sample_token"]
+    frame_idx = 0
+
+    while sample_token:
+        sample = nusc.get("sample", sample_token)
+
+        # CAM_FRONT と LIDAR_TOP のデータを取得
+        cam_token = sample["data"]["CAM_FRONT"]
+        lidar_token = sample["data"]["LIDAR_TOP"]
+
+        cam_data = nusc.get("sample_data", cam_token)
+        lidar_data = nusc.get("sample_data", lidar_token)
+
+        # LiDAR点群とlabelsを読み込み
+        points_lidar, labels = load_lidar_points_and_labels(nusc, lidar_token)
+
+        # LiDAR → world座標変換
+        lidar_ego_pose = nusc.get("ego_pose", lidar_data["ego_pose_token"])
+        lidar_calib = nusc.get("calibrated_sensor", lidar_data["calibrated_sensor_token"])
+        points_world = transform_lidar_to_world(points_lidar, lidar_ego_pose, lidar_calib)
+
+        # カメラパラメータ
+        cam_ego_pose = nusc.get("ego_pose", cam_data["ego_pose_token"])
+        cam_calib = nusc.get("calibrated_sensor", cam_data["calibrated_sensor_token"])
+        w2c = compute_w2c(cam_ego_pose, cam_calib)
+        K = np.array(cam_calib["camera_intrinsic"])
+
+        # 画像サイズを取得
+        from PIL import Image as PILImage
+        img_path = Path(nusc.dataroot) / cam_data["filename"]
+        with PILImage.open(img_path) as img:
+            image_shape = (img.height, img.width)
+
+        # マスク生成
+        mask = project_lidar_to_mask(
+            points_world,
+            labels,
+            w2c,
+            K,
+            image_shape,
+            dynamic_classes=dynamic_classes,
+            dilation_size=dilation_size,
+        )
+
+        # マスクを保存
+        mask_path = masks_dir / f"{frame_idx:04d}.png"
+        cv2.imwrite(str(mask_path), mask)
+        mask_paths[frame_idx] = mask_path
+
+        # 次のフレームへ
+        sample_token = sample["next"] if sample["next"] else None
+        frame_idx += 1
+
+    return mask_paths
