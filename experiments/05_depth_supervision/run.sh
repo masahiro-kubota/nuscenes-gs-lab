@@ -61,7 +61,7 @@ elif [ "$STAGE" -eq 2 ]; then
     fi
 
     echo "=== Stage 2: マスク + 深度拘束（depth-loss-mult=0.1、30k iter）==="
-    uv run ns-train splatfacto \
+    uv run ns-train depth-nerfacto \
       --data "$DATA_DIR" \
       --pipeline.model.depth-loss-mult 0.1 \
       --max-num-iterations 30000 \
@@ -86,7 +86,7 @@ elif [ "$STAGE" -eq 3 ]; then
     fi
 
     echo "=== Stage 3: 深度拘束の重み調整（depth-loss-mult=1.0、30k iter）==="
-    uv run ns-train splatfacto \
+    uv run ns-train depth-nerfacto \
       --data "$DATA_DIR" \
       --pipeline.model.depth-loss-mult 1.0 \
       --max-num-iterations 30000 \
