@@ -136,10 +136,22 @@ with col_image:
         st.warning(f"画像が見つかりません: {img_path}")
 
     fwd = forwards[frame_idx]
+
+    # 速度計算（前フレームとの距離 / 0.5秒）
+    if frame_idx > 0:
+        prev_pos = positions[frame_idx - 1]
+        dist = np.linalg.norm(pos - prev_pos)
+        speed_ms = dist / 0.5  # m/s (2Hz = 0.5秒間隔)
+        speed_kmh = speed_ms * 3.6  # km/h
+        speed_str = f"{speed_kmh:.1f} km/h ({speed_ms:.2f} m/s)"
+    else:
+        speed_str = "N/A (first frame)"
+
     st.code(
         f"Position : ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.2f})\n"
         f"Height   : {pos[2]:.2f} m\n"
-        f"Forward  : ({fwd[0]:.3f}, {fwd[1]:.3f}, {fwd[2]:.3f})",
+        f"Forward  : ({fwd[0]:.3f}, {fwd[1]:.3f}, {fwd[2]:.3f})\n"
+        f"Speed    : {speed_str}",
         language=None,
     )
 
