@@ -408,3 +408,345 @@ def generate_lidar_masks_for_scene(
         frame_idx += 1
 
     return mask_paths
+
+
+def get_bbox_corners_3d(bbox_center: np.ndarray, bbox_size: np.ndarray, bbox_rotation: np.ndarray) -> np.ndarray:
+    """3D bounding box の 8 corners を計算.
+
+    Args:
+        bbox_center: (3,) bbox center in world frame [x, y, z]
+        bbox_size: (3,) bbox size [width, length, height]
+        bbox_rotation: (3, 3) rotation matrix
+
+    Returns:
+        corners: (8, 3) bbox corners in world frame
+    """
+    # bbox の半分のサイズ
+    w, l, h = bbox_size
+
+    # bbox center を原点とした 8 corners（ローカル座標）
+    # nuScenes の座標系: x=前, y=左, z=上
+    corners_local = np.array([
+        [-l/2, -w/2, -h/2],
+        [ l/2, -w/2, -h/2],
+        [ l/2,  w/2, -h/2],
+        [-l/2,  w/2, -h/2],
+        [-l/2, -w/2,  h/2],
+        [ l/2, -w/2,  h/2],
+        [ l/2,  w/2,  h/2],
+        [-l/2,  w/2,  h/2],
+    ])
+
+    # 回転を適用
+    corners_rotated = (bbox_rotation @ corners_local.T).T
+
+    # 平行移動を適用
+    corners_world = corners_rotated + bbox_center
+
+    return corners_world
+
+
+def project_bbox_to_image(
+    bbox_center: np.ndarray,
+    bbox_size: np.ndarray,
+    bbox_rotation: np.ndarray,
+    w2c: np.ndarray,
+    K: np.ndarray,
+    image_shape: tuple[int, int],
+) -> tuple[np.ndarray | None, bool]:
+    """3D bounding box を 2D 画像に投影.
+
+    Args:
+        bbox_center: (3,) bbox center in world frame [x, y, z]
+        bbox_size: (3,) bbox size [width, length, height]
+        bbox_rotation: (3, 3) rotation matrix
+        w2c: 4x4 world-to-camera transform matrix
+        K: 3x3 camera intrinsic matrix
+        image_shape: (height, width)
+
+    Returns:
+        corners_2d: (N, 2) 2D corners in image, or None if not visible
+        is_visible: bool indicating if bbox is visible in camera view
+    """
+    h, w = image_shape
+
+    # 3D corners を取得
+    corners_3d = get_bbox_corners_3d(bbox_center, bbox_size, bbox_rotation)
+
+    # World → camera 座標系に変換
+    corners_homo = np.hstack([corners_3d, np.ones((8, 1))])
+    corners_cam_homo = (w2c @ corners_homo.T).T  # (8, 4)
+    corners_cam = corners_cam_homo[:, :3]  # (8, 3)
+
+    # カメラ背後の点をチェック
+    in_front = corners_cam[:, 2] > 0
+    if not in_front.any():
+        # 全ての corners がカメラ背後 → 見えない
+        return None, False
+
+    # 2D 投影
+    corners_2d_homo = (K @ corners_cam.T).T  # (8, 3)
+    corners_2d = corners_2d_homo[:, :2] / corners_2d_homo[:, 2:3]  # (8, 2)
+
+    # カメラ背後の点を除外
+    corners_2d_visible = corners_2d[in_front]
+
+    # 画像境界内にあるかチェック
+    in_bounds = (
+        (corners_2d_visible[:, 0] >= 0) & (corners_2d_visible[:, 0] < w) &
+        (corners_2d_visible[:, 1] >= 0) & (corners_2d_visible[:, 1] < h)
+    )
+
+    # 少なくとも 1 点が画像内にあれば可視と判定
+    is_visible = in_bounds.any()
+
+    return corners_2d_visible, is_visible
+
+
+def draw_bbox_on_image(
+    image: np.ndarray,
+    corners_2d: np.ndarray,
+    category_name: str,
+    color: tuple[int, int, int] = (0, 255, 0),
+    thickness: int = 2,
+) -> np.ndarray:
+    """2D corners から bounding box を画像に描画.
+
+    Args:
+        image: (H, W, 3) RGB image
+        corners_2d: (N, 2) 2D corners
+        category_name: bbox の category 名
+        color: RGB color tuple
+        thickness: line thickness
+
+    Returns:
+        image: (H, W, 3) RGB image with bbox drawn
+    """
+    if len(corners_2d) < 2:
+        # 点が少なすぎる場合はスキップ
+        return image
+
+    # corners_2d を整数に変換
+    corners_int = corners_2d.astype(np.int32)
+
+    # 凸包を計算して polygon を描画
+    from scipy.spatial import ConvexHull
+    try:
+        hull = ConvexHull(corners_int)
+        hull_points = corners_int[hull.vertices]
+        cv2.polylines(image, [hull_points], isClosed=True, color=color, thickness=thickness)
+
+        # category name を表示
+        # polygon の中心を計算
+        center = hull_points.mean(axis=0).astype(int)
+        cv2.putText(
+            image,
+            category_name.split('.')[-1],  # "vehicle.car" -> "car"
+            tuple(center),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            thickness=1,
+        )
+    except:
+        # ConvexHull が失敗した場合は、単純に点を線で結ぶ
+        for i in range(len(corners_int)):
+            pt1 = tuple(corners_int[i])
+            pt2 = tuple(corners_int[(i + 1) % len(corners_int)])
+            cv2.line(image, pt1, pt2, color, thickness)
+
+    return image
+
+
+def project_bbox_to_mask(
+    bbox_center: np.ndarray,
+    bbox_size: np.ndarray,
+    bbox_rotation: np.ndarray,
+    w2c: np.ndarray,
+    K: np.ndarray,
+    image_shape: tuple[int, int],
+) -> np.ndarray | None:
+    """単一の3D bounding boxから2Dバイナリマスクを生成.
+
+    Args:
+        bbox_center: (3,) bbox center in world frame [x, y, z]
+        bbox_size: (3,) bbox size [width, length, height]
+        bbox_rotation: (3, 3) rotation matrix
+        w2c: 4x4 world-to-camera transform matrix
+        K: 3x3 camera intrinsic matrix
+        image_shape: (height, width)
+
+    Returns:
+        Binary mask (H, W) uint8 (255=bbox領域, 0=背景), or None if not visible
+    """
+    h, w = image_shape
+
+    # bbox を 2D に投影
+    corners_2d, is_visible = project_bbox_to_image(
+        bbox_center, bbox_size, bbox_rotation, w2c, K, image_shape
+    )
+
+    if not is_visible or corners_2d is None:
+        return None
+
+    # マスク初期化
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    # corners_2d を整数に変換
+    corners_int = corners_2d.astype(np.int32)
+
+    # 凸包を計算してpolygonを塗りつぶし
+    from scipy.spatial import ConvexHull
+    try:
+        hull = ConvexHull(corners_int)
+        hull_points = corners_int[hull.vertices]
+        cv2.fillPoly(mask, [hull_points], color=255)
+    except:
+        # ConvexHullが失敗した場合は、全ての点を含む最小矩形を使用
+        x_min = max(0, int(corners_int[:, 0].min()))
+        x_max = min(w, int(corners_int[:, 0].max()))
+        y_min = max(0, int(corners_int[:, 1].min()))
+        y_max = min(h, int(corners_int[:, 1].max()))
+        mask[y_min:y_max, x_min:x_max] = 255
+
+    return mask
+
+
+def project_bboxes_to_mask(
+    nusc,
+    sample: dict,
+    w2c: np.ndarray,
+    K: np.ndarray,
+    image_shape: tuple[int, int],
+    dynamic_categories: list[str] | None = None,
+    dilation_size: int = 5,
+) -> np.ndarray:
+    """1フレームの全bboxから統合された2Dバイナリマスクを生成.
+
+    Args:
+        nusc: NuScenes instance
+        sample: sample データ
+        w2c: 4x4 world-to-camera transform matrix
+        K: 3x3 camera intrinsic matrix
+        image_shape: (height, width)
+        dynamic_categories: マスク対象のcategory prefix list. If None, use default.
+        dilation_size: Morphological dilation kernel size
+
+    Returns:
+        Binary mask (H, W) uint8 (Nerfstudio convention: 0=exclude, 255=include)
+    """
+    from pyquaternion import Quaternion
+
+    h, w = image_shape
+
+    # デフォルトの動的category
+    if dynamic_categories is None:
+        dynamic_categories = ["vehicle.", "human.", "cycle."]
+
+    # マスク初期化（全て0 = 動的領域なし）
+    combined_mask = np.zeros((h, w), dtype=np.uint8)
+
+    # 各annotationを処理
+    for ann_token in sample["anns"]:
+        ann = nusc.get("sample_annotation", ann_token)
+        category_name = ann["category_name"]
+
+        # 動的カテゴリかチェック
+        is_dynamic = any(category_name.startswith(prefix) for prefix in dynamic_categories)
+        if not is_dynamic:
+            continue
+
+        # bbox パラメータを取得
+        bbox_center = np.array(ann["translation"])
+        bbox_size = np.array(ann["size"])
+        bbox_rotation = Quaternion(ann["rotation"]).rotation_matrix
+
+        # マスク生成
+        bbox_mask = project_bbox_to_mask(
+            bbox_center, bbox_size, bbox_rotation, w2c, K, image_shape
+        )
+
+        if bbox_mask is not None:
+            # 論理和（複数のbboxを統合）
+            combined_mask = cv2.bitwise_or(combined_mask, bbox_mask)
+
+    # モルフォロジー膨張を適用
+    if dilation_size > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilation_size, dilation_size))
+        combined_mask = cv2.dilate(combined_mask, kernel, iterations=1)
+
+    # Nerfstudio規約に合わせてマスクを反転
+    # Nerfstudio: 0=exclude from training (dynamic), 255=include (static)
+    # 現在のcombined_mask: 動的領域=255, 静的領域=0 → 反転が必要
+    combined_mask = cv2.bitwise_not(combined_mask)
+
+    return combined_mask
+
+
+def generate_bbox_masks_for_scene(
+    nusc,
+    scene_token: str,
+    output_dir: Path,
+    dynamic_categories: list[str] | None = None,
+    dilation_size: int = 5,
+) -> dict[int, Path]:
+    """シーン全体の全フレームについてbboxマスクを生成.
+
+    Args:
+        nusc: NuScenes instance
+        scene_token: Scene token
+        output_dir: Output directory for masks
+        dynamic_categories: マスク対象のcategory prefix list. If None, use default.
+        dilation_size: Morphological dilation kernel size
+
+    Returns:
+        Dictionary mapping frame_idx to mask_path
+    """
+    scene = nusc.get("scene", scene_token)
+    masks_dir = Path(output_dir) / "masks"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+
+    mask_paths = {}
+    sample_token = scene["first_sample_token"]
+    frame_idx = 0
+
+    while sample_token:
+        sample = nusc.get("sample", sample_token)
+
+        # CAM_FRONT データを取得
+        cam_token = sample["data"]["CAM_FRONT"]
+        cam_data = nusc.get("sample_data", cam_token)
+
+        # カメラパラメータ
+        cam_ego_pose = nusc.get("ego_pose", cam_data["ego_pose_token"])
+        cam_calib = nusc.get("calibrated_sensor", cam_data["calibrated_sensor_token"])
+        w2c = compute_w2c(cam_ego_pose, cam_calib)
+        K = np.array(cam_calib["camera_intrinsic"])
+
+        # 画像サイズを取得
+        from PIL import Image as PILImage
+        img_path = Path(nusc.dataroot) / cam_data["filename"]
+        with PILImage.open(img_path) as img:
+            image_shape = (img.height, img.width)
+
+        # マスク生成
+        mask = project_bboxes_to_mask(
+            nusc,
+            sample,
+            w2c,
+            K,
+            image_shape,
+            dynamic_categories=dynamic_categories,
+            dilation_size=dilation_size,
+        )
+
+        # マスクを保存
+        mask_path = masks_dir / f"{frame_idx:04d}.png"
+        cv2.imwrite(str(mask_path), mask)
+        mask_paths[frame_idx] = mask_path
+
+        # 次のフレームへ
+        sample_token = sample["next"] if sample["next"] else None
+        frame_idx += 1
+
+    return mask_paths

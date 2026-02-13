@@ -45,9 +45,9 @@ st.sidebar.subheader("Display Mode")
 
 # マスクの有無に応じてモードを動的に変更
 if has_masks:
-    mode_options = ["Image Only", "Image + LiDAR", "Image + Mask", "LiDAR Only"]
+    mode_options = ["Image Only", "Image + LiDAR", "Image + Mask", "Image + BBox", "LiDAR Only"]
 else:
-    mode_options = ["Image Only", "Image + LiDAR", "LiDAR Only"]
+    mode_options = ["Image Only", "Image + LiDAR", "Image + BBox", "LiDAR Only"]
 
 display_mode = st.sidebar.radio(
     "Select Mode",
@@ -406,6 +406,108 @@ with col_image:
             except Exception as e:
                 st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
                 st.error(f"マスク読み込みエラー: {e}")
+        elif display_mode == "Image + BBox":
+            # BBox 表示
+            try:
+                import cv2
+                from pyquaternion import Quaternion
+                from nuscenes.nuscenes import NuScenes
+                from nuscenes_gs.masks import compute_w2c, project_bbox_to_image, draw_bbox_on_image
+
+                # nuScenes を読み込み
+                nusc = NuScenes(version="v1.0-mini", dataroot="data/raw", verbose=False)
+
+                # シーン名を抽出
+                dir_name = transforms_path.parent.name
+                import re
+                match = re.match(r"(scene-\d+)", dir_name)
+                if match:
+                    scene_name = match.group(1)
+                else:
+                    scene_name = "_".join(dir_name.split("_")[:2])
+
+                # シーンを検索
+                scene_idx = [s["name"] for s in nusc.scene].index(scene_name)
+                scene = nusc.scene[scene_idx]
+
+                # フレーム token を取得
+                sample_token = scene["first_sample_token"]
+                for _ in range(frame_idx):
+                    sample = nusc.get("sample", sample_token)
+                    sample_token = sample["next"] if sample["next"] else None
+
+                if sample_token:
+                    sample = nusc.get("sample", sample_token)
+                    cam_token = sample["data"]["CAM_FRONT"]
+                    cam_data = nusc.get("sample_data", cam_token)
+
+                    # カメラパラメータ
+                    cam_ego_pose = nusc.get("ego_pose", cam_data["ego_pose_token"])
+                    cam_calib = nusc.get("calibrated_sensor", cam_data["calibrated_sensor_token"])
+                    w2c = compute_w2c(cam_ego_pose, cam_calib)
+                    K = np.array(cam_calib["camera_intrinsic"])
+                    image_shape = (img.height, img.width)
+
+                    # 画像を numpy array に変換
+                    img_with_bbox = np.array(img).copy()
+
+                    # sample の annotations を取得
+                    bbox_count = 0
+                    for ann_token in sample["anns"]:
+                        ann = nusc.get("sample_annotation", ann_token)
+
+                        # 動的オブジェクトのみフィルタ
+                        category = ann["category_name"]
+                        if not (category.startswith("vehicle.") or
+                                category.startswith("human.") or
+                                category.startswith("cycle.")):
+                            continue
+
+                        # bbox パラメータ
+                        bbox_center = np.array(ann["translation"])
+                        bbox_size = np.array(ann["size"])
+                        bbox_quat = Quaternion(ann["rotation"])
+                        bbox_rotation = bbox_quat.rotation_matrix
+
+                        # 2D 投影
+                        corners_2d, is_visible = project_bbox_to_image(
+                            bbox_center,
+                            bbox_size,
+                            bbox_rotation,
+                            w2c,
+                            K,
+                            image_shape,
+                        )
+
+                        if is_visible and corners_2d is not None:
+                            # カテゴリに応じて色を変更
+                            if category.startswith("vehicle."):
+                                color = (0, 255, 0)  # 緑
+                            elif category.startswith("human."):
+                                color = (255, 0, 0)  # 赤
+                            elif category.startswith("cycle."):
+                                color = (255, 255, 0)  # 黄色
+                            else:
+                                color = (128, 128, 128)  # 灰色
+
+                            img_with_bbox = draw_bbox_on_image(
+                                img_with_bbox,
+                                corners_2d,
+                                category,
+                                color=color,
+                                thickness=2,
+                            )
+                            bbox_count += 1
+
+                    img_with_bbox_pil = Image.fromarray(img_with_bbox)
+                    st.image(img_with_bbox_pil, caption=f"Frame {frame_idx} (with BBox, {bbox_count} objects)", use_container_width=True)
+                    st.sidebar.info(f"BBox count: {bbox_count}")
+                else:
+                    st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
+                    st.warning(f"フレーム {frame_idx} のデータが見つかりません")
+            except Exception as e:
+                st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
+                st.error(f"BBox 描画エラー: {e}")
         else:
             st.image(img, caption=f"Frame {frame_idx} / {n_frames - 1}  —  {frames[frame_idx]['file_path']}", use_container_width=True)
     else:
