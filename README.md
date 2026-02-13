@@ -74,28 +74,34 @@ nuscenes-gs-lab/
 │   ├── __init__.py
 │   ├── poses.py               # pose合成・座標変換
 │   ├── nerfstudio_export.py   # Nerfstudio形式エクスポート
-│   ├── masks.py               # bbox除去、セグメンテーション（予定）
-│   └── geometry.py            # LiDAR投影など（予定）
+│   ├── masks.py               # bbox投影・LiDARセグメンテーションマスク
+│   └── depth.py               # LiDARスパース深度マップ生成
 │
 ├── scripts/                   # 汎用ツール（実験横断）
-│   ├── export_front_only.py
-│   ├── visualize_poses.py     # ポーズ3D可視化（静的PNG）
-│   └── pose_viewer.py         # ポーズ+画像ビューア（Streamlit）
+│   ├── export_front_only.py           # CAM_FRONT エクスポート
+│   ├── export_front_with_lidar_masks.py  # LiDARマスク付きエクスポート
+│   ├── export_front_with_bbox_masks.py   # BBoxマスク付きエクスポート
+│   ├── export_front_with_depth.py        # 深度付きエクスポート
+│   ├── analyze_scene_speed.py            # シーン速度分析
+│   └── pose_viewer.py                    # ポーズ+画像ビューア（Streamlit）
 │
 ├── experiments/               # 実験ごとに独立
-│   ├── front_cam_baseline/    # CAM_FRONT single-cam baseline
-│   │   ├── plan.md            # 実験計画
-│   │   ├── notes.md           # 経緯・結果・所見
-│   │   └── run.sh             # 再現コマンド一式
-│   ├── vehicle_removal/       # （予定）
-│   ├── relightable_gs/        # （予定）
-│   └── su_rgs/                # （予定）
+│   ├── roadmap.md             # ロードマップ（Phase 0〜5）
+│   ├── 00_front_cam_baseline/ # CAM_FRONT baseline ✅
+│   ├── 01_scene_analysis/     # シーン速度分析 ✅
+│   ├── 02_lidarseg_visualization/ # LiDAR投影可視化 ✅
+│   ├── 03_lidarseg_masking/   # LiDARセグメンテーションマスク ✅
+│   ├── 04_bbox_masking/       # 3D BBoxマスク ✅
+│   ├── 05_depth_supervision/  # LiDARスパース深度拘束
+│   └── 06_multicam_front3/    # 前方3カメラ統合
 │
 ├── data/
 │   ├── raw/                   # nuScenes本体（gitignore）
 │   └── derived/               # 変換済みデータ
 │       └── scene-XXXX_front/
 │           ├── images/
+│           ├── masks/         # マスク画像（実験による）
+│           ├── depth/         # 深度マップ（実験による）
 │           └── transforms.json
 │
 └── outputs/                   # 学習出力（gitignore）
@@ -111,15 +117,16 @@ nuscenes-gs-lab/
 
 * pose合成・座標変換
 * データ読み込み・エクスポート
-* bbox投影・マスク生成
-* LiDAR投影
+* bbox投影・LiDARセグメンテーションマスク生成
+* LiDARスパース深度マップ生成
 
 ### scripts/ — 汎用ツール
 
 実験をまたいで使える実行スクリプト。
 
-* データ変換（export_front_only.py）
-* 可視化
+* データ変換（export_front_only.py、各マスク/深度付きバリエーション）
+* シーン分析（analyze_scene_speed.py）
+* 可視化（pose_viewer.py — Streamlit）
 
 ### experiments/ — 実験単位
 
@@ -154,27 +161,33 @@ nuscenes-gs-lab/
 ## .gitignore
 
 ```
+__pycache__/
+.venv/
+uv.lock
 data/raw/
 data/derived/**/images/
+data/derived/**/*.png
 outputs/
 *.ckpt
 *.pth
 *.pt
+.vscode/
+.idea/
 ```
 
 ---
 
 ## 進化パス
 
-| フェーズ           | 内容                            |
-| ---------------- | ------------------------------- |
-| front_cam_baseline | front-only baseline           |
-| A-mask           | bbox マスク                      |
-| B                | LiDAR 拘束                      |
-| C                | multi-cam                       |
-| D                | dynamic GS                      |
-| Relightable      | Relightable GS                  |
-| Deferred         | Deferred GS                     |
-| SU-RGS           | SU-RGS                          |
+| Phase | 実験 | 内容 | 状態 |
+|-------|------|------|------|
+| 0 | Exp 00〜02 | 環境構築・パイプライン検証・シーン分析 | ✅ |
+| 1 | Exp 04 | 3D BBox マスクで動体除去 | ✅ |
+| 2 | Exp 03 | LiDAR セグメンテーションで精密マスク | ✅ |
+| 3 | Exp 05 | LiDAR スパース深度拘束 | 計画済み |
+| 4 | Exp 06 | マルチカメラ（前方3カメラ）統合 | 計画済み |
+| 5 | — | 穴埋め・再利用性向上 | 未着手 |
+
+詳細は [experiments/roadmap.md](experiments/roadmap.md) を参照。
 
 GS手法本体は外部リポジトリ。このリポにはデータ準備・評価・記録を置く。

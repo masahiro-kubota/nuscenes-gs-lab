@@ -28,7 +28,8 @@ DATA_DIR="data/derived/${SCENE_NAME}_front_bbox_masked"
 # Stage 0: データエクスポート（必要に応じて）
 if [ ! -d "$DATA_DIR" ]; then
     echo "=== Stage 0: BBox マスク付きデータのエクスポート ==="
-    uv run python scripts/export_front_with_bbox_masks.py \
+    PYTHONPATH=$(pwd)/src:$PYTHONPATH \
+      uv run python scripts/export_front_with_bbox_masks.py \
       --dataroot data/raw \
       --scene-index "$SCENE_INDEX" \
       --dilation 5

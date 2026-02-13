@@ -296,3 +296,139 @@ def export_scene_front_with_bbox_masks(
         json.dump(transforms, f, indent=2)
 
     return out_path
+
+
+def export_scene_front_with_depth(
+    nusc: NuScenes,
+    scene_token: str,
+    output_dir: str | Path,
+    mask_type: str | None = None,
+    mask_params: dict | None = None,
+    depth_range: tuple[float, float] = (0.1, 80.0),
+) -> Path:
+    """1シーンの CAM_FRONT を深度マップ付きで Nerfstudio 形式でエクスポートする.
+
+    Args:
+        nusc: NuScenes インスタンス
+        scene_token: 対象シーンの token
+        output_dir: 出力ディレクトリ
+        mask_type: マスクタイプ（"lidar", "bbox", None）
+        mask_params: マスク生成パラメータ（dilation_size など）
+        depth_range: (min_depth, max_depth) in meters
+
+    Returns:
+        生成した transforms.json のパス
+    """
+    from nuscenes_gs.depth import generate_depth_maps_for_scene
+
+    output_dir = Path(output_dir)
+    images_dir = output_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    scene = nusc.get("scene", scene_token)
+    sample_token = scene["first_sample_token"]
+
+    frames: list[dict] = []
+    intrinsic = None
+    width, height = None, None
+    idx = 0
+
+    # 1. 画像をエクスポート
+    while sample_token:
+        sample = nusc.get("sample", sample_token)
+        cam_token = sample["data"]["CAM_FRONT"]
+        cam_data = nusc.get("sample_data", cam_token)
+
+        ego_pose = nusc.get("ego_pose", cam_data["ego_pose_token"])
+        calib = nusc.get(
+            "calibrated_sensor", cam_data["calibrated_sensor_token"]
+        )
+
+        # intrinsic は1回だけ取得（CAM_FRONTはシーン内で固定）
+        if intrinsic is None:
+            K = np.array(calib["camera_intrinsic"])
+            intrinsic = {
+                "fl_x": K[0, 0],
+                "fl_y": K[1, 1],
+                "cx": K[0, 2],
+                "cy": K[1, 2],
+            }
+            width = cam_data["width"]
+            height = cam_data["height"]
+
+        # c2w 計算
+        from nuscenes_gs.poses import compute_c2w
+        c2w = compute_c2w(ego_pose, calib)
+
+        # 画像コピー
+        src_path = Path(nusc.dataroot) / cam_data["filename"]
+        dst_name = f"{idx:04d}.jpg"
+        shutil.copy2(src_path, images_dir / dst_name)
+
+        # フレーム情報
+        frame_data = {
+            "file_path": f"images/{dst_name}",
+            "transform_matrix": c2w.tolist(),
+            "depth_file_path": f"depth/{idx:04d}.png",
+        }
+
+        # マスクパス追加（オプション）
+        if mask_type is not None:
+            frame_data["mask_path"] = f"masks/{idx:04d}.png"
+
+        frames.append(frame_data)
+
+        idx += 1
+        sample_token = sample["next"] if sample["next"] else None
+
+    # 2. 深度マップを生成
+    print(f"Generating depth maps for {idx} frames...")
+    depth_paths = generate_depth_maps_for_scene(
+        nusc,
+        scene_token,
+        output_dir,
+        depth_range=depth_range,
+    )
+    print(f"Generated {len(depth_paths)} depth maps")
+
+    # 3. マスクを生成（オプション）
+    if mask_type == "lidar":
+        from nuscenes_gs.masks import generate_lidar_masks_for_scene
+        print(f"Generating LiDAR masks for {idx} frames...")
+        params = mask_params or {}
+        mask_paths = generate_lidar_masks_for_scene(
+            nusc,
+            scene_token,
+            output_dir,
+            dynamic_classes=params.get("dynamic_classes"),
+            dilation_size=params.get("dilation_size", 64),
+        )
+        print(f"Generated {len(mask_paths)} LiDAR masks")
+    elif mask_type == "bbox":
+        from nuscenes_gs.masks import generate_bbox_masks_for_scene
+        print(f"Generating bbox masks for {idx} frames...")
+        params = mask_params or {}
+        mask_paths = generate_bbox_masks_for_scene(
+            nusc,
+            scene_token,
+            output_dir,
+            dynamic_categories=params.get("dynamic_categories"),
+            dilation_size=params.get("dilation_size", 5),
+        )
+        print(f"Generated {len(mask_paths)} bbox masks")
+
+    # 4. transforms.json を保存
+    transforms = {
+        "camera_model": "OPENCV",
+        "w": width,
+        "h": height,
+        **intrinsic,
+        "depth_unit_scale_factor": 0.001,  # mm → m
+        "frames": frames,
+    }
+
+    out_path = output_dir / "transforms.json"
+    with open(out_path, "w") as f:
+        json.dump(transforms, f, indent=2)
+
+    return out_path
