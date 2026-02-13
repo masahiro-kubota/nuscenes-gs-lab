@@ -1,157 +1,121 @@
-いいですね。
-**`nuscenes-gs-lab` は「nuScenes × 3DGS の実験基盤」**として設計するのが正解です。
+# nuscenes-gs-lab
 
-あなたの目的は：
+nuScenesデータを使って、3D Gaussian Splattingを段階的に実験・拡張するための再現可能な研究基盤。
 
-* A’（Front-only, pose-given）でまず動かす
-* マスク / LiDAR拘束 / surround に拡張
-* 将来的に動体GSや再合成まで行く
-
-なので、**単発スクリプト置き場ではなく“実験フレームワーク”として設計**します。
+単発スクリプト置き場ではなく「実験フレームワーク」として設計する。
 
 ---
 
-# 🧠 nuscenes-gs-lab の目的
+## スコープ
 
-> nuScenesデータを使って、3D Gaussian Splattingを段階的に実験・拡張するための再現可能な研究基盤
+### 含むもの
 
----
-
-# 🎯 スコープ
-
-## 含むもの
-
-* nuScenes → Nerfstudio形式変換
+* nuScenes → 各手法向けデータ変換
 * pose合成（ego_pose + calibrated_sensor）
-* 実験設定（YAML）
-* 実験ログ（Markdown）
 * マスク生成（bbox / lidarseg）
 * 深度拘束実験
-* 将来的なmulti-cam統合
+* multi-cam統合
+* 各GS手法（Relightable, Deferred, SU-RGS等）のデータ準備・評価
 
-## 含まないもの
+### 含まないもの
 
 * nuScenes本体データ
 * 学習済みモデルの重い出力
-* 研究成果物の最終アーティファクト
+* GS手法本体の実装（外部リポジトリ）
 
 ---
 
-# 📁 推奨ディレクトリ構成（最適化済み）
+## ディレクトリ構成
 
 ```
 nuscenes-gs-lab/
 │
-├── README.md
 ├── pyproject.toml
 ├── .gitignore
 │
-├── configs/
-│   ├── dataset/
-│   │   └── nuscenes_mini.yaml
-│   │
-│   └── exp/
-│       ├── a_prime.yaml
-│       ├── a_mask.yaml
-│       ├── b_depth.yaml
-│       └── c_surround.yaml
+├── src/nuscenes_gs/           # 共通基盤（安定層）
+│   ├── __init__.py
+│   ├── poses.py               # pose合成・座標変換
+│   ├── nerfstudio_export.py   # Nerfstudio形式エクスポート
+│   ├── masks.py               # bbox除去、セグメンテーション
+│   └── geometry.py            # LiDAR投影など
 │
-├── scripts/
+├── scripts/                   # 汎用ツール（実験横断）
 │   ├── export_front_only.py
-│   ├── train_splatfacto.sh
-│   ├── render.sh
-│   ├── make_bbox_masks.py
-│   └── project_lidar_depth.py
+│   └── visualize_poses.py
 │
-├── src/
-│   └── nuscenes_gs/
-│       ├── __init__.py
-│       ├── io.py
-│       ├── poses.py
-│       ├── nerfstudio_export.py
-│       └── geometry.py
+├── experiments/               # 実験ごとに独立
+│   ├── a_prime/               # A': front-only baseline
+│   │   ├── run.sh             # 再現コマンド一式
+│   │   ├── config.yaml        # 実験パラメータ
+│   │   └── notes.md           # 経緯・結果・所見
+│   ├── vehicle_removal/
+│   │   ├── run.sh
+│   │   ├── inpaint.py         # この実験固有のスクリプト
+│   │   └── notes.md
+│   ├── relightable_gs/
+│   └── su_rgs/
+│
+├── doc/                       # 設計ドキュメント
 │
 ├── data/
-│   ├── raw/          # symlink推奨
-│   └── derived/
-│       └── scene-0011_front/
+│   ├── raw/                   # nuScenes本体（gitignore）
+│   └── derived/               # 変換済みデータ
+│       └── scene-XXXX_front/
 │           ├── images/
 │           └── transforms.json
 │
-├── outputs/          # gitignore
-│
-└── notes/
-    ├── 2026-02-13_a_prime_scene0011.md
-    └── experiments_index.md
+└── outputs/                   # 学習出力（gitignore）
 ```
 
 ---
 
-# 🔧 各レイヤの役割
+## 3層構造
 
-## 1️⃣ src/
+### src/ — 共通基盤
 
-ロジックの本体
+2つ以上の実験で使う処理をここに置く。
 
-* pose合成
-* bbox投影
+* pose合成・座標変換
+* データ読み込み・エクスポート
+* bbox投影・マスク生成
 * LiDAR投影
-* 座標変換
 
-→ ここがあなたの「研究コア」
+### scripts/ — 汎用ツール
 
----
+実験をまたいで使える実行スクリプト。
 
-## 2️⃣ scripts/
+* データ変換（export_front_only.py）
+* 可視化
 
-実行レイヤ
+### experiments/ — 実験単位
 
-* データ変換
-* 学習実行
-* レンダリング
+各実験が自己完結する単位。
 
-→ コマンドを整理する層
+* `config.yaml` — パラメータ（scene, 枚数, 手法, 学習回数）
+* `run.sh` — 再現コマンド（export → train → render の全手順）
+* `notes.md` — 何を試した、何が壊れた、次何をやるか
+* 実験固有のスクリプト — その実験でしか使わない前処理・後処理
 
----
-
-## 3️⃣ configs/
-
-実験の定義
-
-* どのscene
-* 何枚使うか
-* どの手法か
-* 学習回数
-
-→ 再現性の中核
+共通処理は `src/` から import し、固有処理だけここに書く。
+コードが2つ以上の実験で必要になったら `src/` に昇格させる。
 
 ---
 
-## 4️⃣ notes/
-
-実験ログ（超重要）
-
-* 何を試したか
-* 何が壊れたか
-* 次何をやるか
-
-半年後の自分を救う場所。
-
----
-
-# 🧪 実験ワークフロー（標準化）
+## 実験ワークフロー
 
 ```
-1. config作成
-2. export
-3. train
-4. viewer確認
-5. notesに記録
+1. experiments/<name>/ を作成
+2. config.yaml でパラメータ定義
+3. データ変換（scripts/ or 実験固有スクリプト）
+4. 学習・レンダリング
+5. notes.md に結果を記録
+6. run.sh に再現コマンドをまとめる
 ```
 
 ---
 
-# 🔒 .gitignore最小セット
+## .gitignore
 
 ```
 data/raw/
@@ -164,30 +128,17 @@ outputs/
 
 ---
 
-# 🔥 進化パス
+## 進化パス
 
-| フェーズ   | 追加するもの     |
-| ------ | ---------- |
-| A’     | front-only |
-| A-mask | bboxマスク    |
-| B      | LiDAR拘束    |
-| C      | multi-cam  |
-| D      | dynamic GS |
+| フェーズ           | 内容                            |
+| ---------------- | ------------------------------- |
+| A'               | front-only baseline             |
+| A-mask           | bbox マスク                      |
+| B                | LiDAR 拘束                      |
+| C                | multi-cam                       |
+| D                | dynamic GS                      |
+| Relightable      | Relightable GS                  |
+| Deferred         | Deferred GS                     |
+| SU-RGS           | SU-RGS                          |
 
-このrepoはこの進化を前提に設計。
-
----
-
-# 📌 重要な思想
-
-このrepoは：
-
-> 「GSを動かすための場所」
-
-ではなく
-
-> 「nuScenes × GSの実験を体系化する研究基盤」
-
-です。
-
-
+GS手法本体は外部リポジトリ。このリポにはデータ準備・評価・記録を置く。
