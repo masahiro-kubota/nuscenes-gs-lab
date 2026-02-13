@@ -12,6 +12,7 @@ STAGE="${2:-1}"
 # CUDA environment (required for gsplat)
 export PATH=/usr/local/cuda-12.3/bin:$PATH
 export CUDA_HOME=/usr/local/cuda-12.3
+export MAX_JOBS=1  # Limit parallel compilation to avoid OOM during gsplat JIT build
 
 # 1. Export
 echo "=== Stage 0: Export data ==="
